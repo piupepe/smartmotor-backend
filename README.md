@@ -25,7 +25,7 @@ uvicorn main_tm221:app --host 0.0.0.0 --port $PORT
 
 ## Variáveis de ambiente
 
-Ver `.env` (ativo) e `.env.tm221.example` (modelo). O broker **precisa** ser privado:
+Ver `.env` (ativo) e `.env.example` (modelo). O broker **precisa** ser privado:
 o tópico de comando aceita partida de motor.
 
 ## Atenção
