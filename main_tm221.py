@@ -21,6 +21,9 @@ async def lifespan(app):
 app = FastAPI(title='SmartMotor TM221 físico', version='3.0.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
     allow_origins=os.getenv('CORS_ORIGINS', 'https://smartmotor-frontend.vercel.app,http://localhost:5173,http://127.0.0.1:5173').split(','),
+    # Previews e dominio de producao do Vercel mudam de nome; o regex cobre todos os
+    # projetos "smartmotor*". CORS nao e a barreira de seguranca aqui — o Bearer token e.
+    allow_origin_regex=os.getenv('CORS_ORIGIN_REGEX', r'https://smartmotor[a-z0-9-]*\.vercel\.app'),
     allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])
 
 def authorize(authorization: str = Header(default='')):

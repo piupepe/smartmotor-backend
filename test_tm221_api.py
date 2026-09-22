@@ -62,3 +62,32 @@ def test_start_interlock():
     try: link.command('start')
     except ValueError: pass
     else: raise AssertionError('offline PLC accepted START')
+
+
+def test_freq_retries_while_plc_confirms_previous_command(monkeypatch):
+    link = EdgeLink(); link.PENDING_RETRY_S = 2.0
+    calls = []
+    def once(action, **kw):
+        calls.append(action)
+        if len(calls) < 3: raise ValueError('command_pending')
+        return {'status': 'accepted'}
+    monkeypatch.setattr(link, '_command_once', once)
+    assert link.command('freq', value=40)['status'] == 'accepted' and len(calls) == 3
+
+def test_start_is_not_retried_and_pending_expires(monkeypatch):
+    link = EdgeLink(); link.PENDING_RETRY_S = 0.5
+    monkeypatch.setattr(link, '_command_once', lambda a, **k: (_ for _ in ()).throw(ValueError('command_pending')))
+    for action in ('start', 'freq'):
+        try: link.command(action, value=40)
+        except ValueError as e: assert str(e) == 'command_pending'
+        else: raise AssertionError(action + ' deveria falhar')
+
+def test_cors_accepts_vercel_previews_only():
+    client = TestClient(app)
+    pre = lambda o: client.options('/motor/start', headers={'Origin': o,
+        'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization'})
+    for ok in ('https://smartmotor-frontend.vercel.app', 'https://smartmotor-ui-git-main-piupepe.vercel.app',
+               'http://localhost:5173'):
+        assert pre(ok).headers.get('access-control-allow-origin') == ok, ok
+    for bad in ('https://evil.com', 'https://smartmotor.vercel.app.evil.com', 'http://smartmotor-x.vercel.app'):
+        assert pre(bad).headers.get('access-control-allow-origin') is None, bad

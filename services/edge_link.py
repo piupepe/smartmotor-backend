@@ -81,7 +81,26 @@ class EdgeLink:
         if result.rc != mqtt.MQTT_ERR_SUCCESS:
             raise ConnectionError('Falha ao enviar para o broker')
 
+    # freq/ramp nao usam a caixa postal de comando (reg 6/18) do ESP32, mas ele os
+    # recusa com "command_pending" enquanto o CLP nao confirmou o comando anterior.
+    # Isso acontece quando o operador solta o slider logo depois de LIGAR: em vez de
+    # devolver erro, repete ate o CLP confirmar (normalmente < 1 s).
+    RETRY_WHILE_PENDING = ('freq', 'ramp')
+    PENDING_RETRY_S = 3.0
+
     def command(self, action, **parameters):
+        limit = time.monotonic() + self.PENDING_RETRY_S
+        while True:
+            try:
+                return self._command_once(action, **parameters)
+            except ValueError as e:
+                if (action in self.RETRY_WHILE_PENDING and str(e) == 'command_pending'
+                        and time.monotonic() < limit):
+                    time.sleep(0.3)
+                    continue
+                raise
+
+    def _command_once(self, action, **parameters):
         raw = self.snapshot()
         if not raw:
             raise ConnectionError('ESP32 sem telemetria recente')
