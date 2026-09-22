@@ -91,3 +91,17 @@ def test_cors_accepts_vercel_previews_only():
         assert pre(ok).headers.get('access-control-allow-origin') == ok, ok
     for bad in ('https://evil.com', 'https://smartmotor.vercel.app.evil.com', 'http://smartmotor-x.vercel.app'):
         assert pre(bad).headers.get('access-control-allow-origin') is None, bad
+
+
+def test_swagger_exposes_bearer_scheme_and_accepts_token(monkeypatch):
+    monkeypatch.setenv('MOTOR_API_TOKEN', 'test-only')
+    client = TestClient(app)
+    spec = client.get('/openapi.json').json()
+    assert 'HTTPBearer' in spec['components']['securitySchemes']
+    params = [p['name'].lower() for p in spec['paths']['/motor/freq']['post'].get('parameters', [])]
+    assert 'authorization' not in params          # nao pode mais ser um header comum
+    assert client.post('/motor/freq?value=40').status_code == 401
+    assert client.post('/motor/freq?value=40', headers={'Authorization': 'Bearer errado'}).status_code == 401
+    assert client.post('/motor/freq?value=40', headers={'Authorization': 'test-only'}).status_code == 401  # sem "Bearer "
+    r = client.post('/motor/freq?value=40', headers={'Authorization': 'Bearer test-only'})
+    assert r.status_code == 503 and 'telemetria' in r.json()['detail']   # token ok; falta o ESP32

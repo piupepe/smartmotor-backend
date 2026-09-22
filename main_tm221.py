@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 from services.edge_link import EdgeLink, frontend_payload
@@ -26,11 +27,17 @@ app.add_middleware(CORSMiddleware,
     allow_origin_regex=os.getenv('CORS_ORIGIN_REGEX', r'https://smartmotor[a-z0-9-]*\.vercel\.app'),
     allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])
 
-def authorize(authorization: str = Header(default='')):
+# Esquema de seguranca declarado (e nao um Header comum): o Swagger em /docs ignora
+# parametros de cabecalho chamados "Authorization" pela especificacao OpenAPI, entao
+# ali o token nunca era enviado e toda chamada dava 401. Com HTTPBearer, o /docs ganha
+# o botao "Authorize" e o token vai em todas as requisicoes.
+bearer = HTTPBearer(auto_error=False, description='MOTOR_API_TOKEN configurado no Render')
+
+def authorize(cred: HTTPAuthorizationCredentials | None = Depends(bearer)):
     token = os.getenv('MOTOR_API_TOKEN', '')
     if not token:
         raise HTTPException(503, 'Controle remoto ainda não configurado')
-    if not hmac.compare_digest(authorization, 'Bearer ' + token):
+    if cred is None or not hmac.compare_digest(cred.credentials.encode(), token.encode()):
         raise HTTPException(401, 'Chave de operação inválida')
 
 def send(action, **parameters):
