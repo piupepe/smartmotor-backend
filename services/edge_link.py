@@ -20,6 +20,8 @@ class EdgeLink:
         self.stop_event = threading.Event()
         self.worker = None
         self.error = 'not_started'
+        self.received_count = 0     # telemetria aceita
+        self.rejected_count = 0     # chegou no topico mas foi descartada (formato/retained/duplicada)
 
     def snapshot(self):
         with self.lock:
@@ -41,6 +43,7 @@ class EdgeLink:
     def on_message(self, client, userdata, message):
         # Retained telemetry/acks cannot prove this boot is alive.
         if message.retain:
+            self.rejected_count += 1
             return
         try:
             data = json.loads(message.payload)
@@ -48,8 +51,10 @@ class EdgeLink:
                 return
             if message.topic == self.topic + '/telemetry':
                 if data.get('source') != 'tm221' or not isinstance(data.get('boot'), str):
+                    self.rejected_count += 1
                     return
                 if not isinstance(data.get('uptime_ms'), int):
+                    self.rejected_count += 1
                     return
                 with self.lock:
                     # Duplicates from QoS replay must not renew freshness.
@@ -58,6 +63,7 @@ class EdgeLink:
                         return
                     self.latest = data
                     self.received_at = time.monotonic()
+                    self.received_count += 1
             elif message.topic == self.topic + '/ack':
                 with self.lock:
                     waiter = self.pending.get(data.get('id'))

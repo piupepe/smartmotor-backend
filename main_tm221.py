@@ -2,6 +2,7 @@
 import asyncio
 import hmac
 import os
+import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
@@ -56,8 +57,17 @@ def home():
 
 @app.get('/health')
 def health():
+    # broker e topico entram aqui de proposito: quando o ESP32 publica e o backend nao
+    # recebe, a causa quase sempre e cluster ou topico diferente, e sem isso so resta adivinhar.
     return {'status': 'ok', 'mqtt_connected': edge.connected,
-            'telemetry_fresh': edge.snapshot() is not None, 'configuration': edge.error}
+            'telemetry_fresh': edge.snapshot() is not None, 'configuration': edge.error,
+            'broker': os.getenv('MQTT_HOST', ''), 'porta': os.getenv('MQTT_PORT', '8883'),
+            'usuario': os.getenv('MQTT_USER', ''),
+            'topico_telemetria': edge.topic + '/telemetry',
+            'ultima_telemetria_ha_s': (None if not edge.received_at
+                                       else round(time.monotonic() - edge.received_at, 1)),
+            'mensagens_recebidas': edge.received_count,
+            'mensagens_descartadas': edge.rejected_count}
 
 @app.get('/motor/status')
 def motor_status():
