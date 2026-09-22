@@ -105,3 +105,22 @@ def test_swagger_exposes_bearer_scheme_and_accepts_token(monkeypatch):
     assert client.post('/motor/freq?value=40', headers={'Authorization': 'test-only'}).status_code == 401  # sem "Bearer "
     r = client.post('/motor/freq?value=40', headers={'Authorization': 'Bearer test-only'})
     assert r.status_code == 503 and 'telemetria' in r.json()['detail']   # token ok; falta o ESP32
+
+def test_env_with_whitespace_does_not_break_topic_or_cors(monkeypatch):
+    # O ESP32 ja ficou horas fora do ar por um espaco colado dentro de MQTT_USER.
+    # No painel do Render esse espaco e invisivel: o codigo nao pode depender de ve-lo.
+    monkeypatch.setenv('MQTT_TOPIC_BASE', ' smartmotor/SM-001/\n')
+    monkeypatch.setenv('MOTOR_API_TOKEN', ' test-only ')
+    assert EdgeLink().topic == 'smartmotor/SM-001'
+    r = TestClient(app).post('/motor/start', headers={'Authorization': 'Bearer test-only'})
+    assert r.status_code != 401
+
+def test_health_lists_topics_seen_on_the_cluster():
+    # Sintoma de bancada: o ESP32 publica, o backend nao recebe. A assinatura
+    # curinga responde "em qual topico ele esta publicando" sem adivinhacao.
+    link = EdgeLink(); link.connected = True
+    outro = SimpleNamespace(topic='smartmotor/SM-002/telemetry', payload=b'{}', retain=False)
+    link.on_message(None, None, outro)
+    assert link.snapshot() is None                       # nao contamina a telemetria
+    assert link.rejected_count == 0                      # nem conta como descarte nosso
+    assert 'smartmotor/SM-002/telemetry' in link.topics_seen

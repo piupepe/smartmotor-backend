@@ -1,7 +1,6 @@
 """Production entry point for the physical PLC: uvicorn main_tm221:app."""
 import asyncio
 import hmac
-import os
 import time
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -10,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
-from services.edge_link import EdgeLink, frontend_payload
+from services.edge_link import EdgeLink, env, frontend_payload
 
 edge = EdgeLink()
 
@@ -22,10 +21,12 @@ async def lifespan(app):
 
 app = FastAPI(title='SmartMotor TM221 físico', version='3.0.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
-    allow_origins=os.getenv('CORS_ORIGINS', 'https://smartmotor-frontend.vercel.app,http://localhost:5173,http://127.0.0.1:5173').split(','),
+    # .strip() por origem: um espaco depois da virgula no painel do Render derruba
+    # o CORS sem nenhuma mensagem de erro no log.
+    allow_origins=[o.strip() for o in env('CORS_ORIGINS', 'https://smartmotor-frontend.vercel.app,http://localhost:5173,http://127.0.0.1:5173').split(',') if o.strip()],
     # Previews e dominio de producao do Vercel mudam de nome; o regex cobre todos os
     # projetos "smartmotor*". CORS nao e a barreira de seguranca aqui — o Bearer token e.
-    allow_origin_regex=os.getenv('CORS_ORIGIN_REGEX', r'https://smartmotor[a-z0-9-]*\.vercel\.app'),
+    allow_origin_regex=env('CORS_ORIGIN_REGEX', r'https://smartmotor[a-z0-9-]*\.vercel\.app'),
     allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])
 
 # Esquema de seguranca declarado (e nao um Header comum): o Swagger em /docs ignora
@@ -35,7 +36,7 @@ app.add_middleware(CORSMiddleware,
 bearer = HTTPBearer(auto_error=False, description='MOTOR_API_TOKEN configurado no Render')
 
 def authorize(cred: HTTPAuthorizationCredentials | None = Depends(bearer)):
-    token = os.getenv('MOTOR_API_TOKEN', '')
+    token = env('MOTOR_API_TOKEN')
     if not token:
         raise HTTPException(503, 'Controle remoto ainda não configurado')
     if cred is None or not hmac.compare_digest(cred.credentials.encode(), token.encode()):
@@ -61,9 +62,12 @@ def health():
     # recebe, a causa quase sempre e cluster ou topico diferente, e sem isso so resta adivinhar.
     return {'status': 'ok', 'mqtt_connected': edge.connected,
             'telemetry_fresh': edge.snapshot() is not None, 'configuration': edge.error,
-            'broker': os.getenv('MQTT_HOST', ''), 'porta': os.getenv('MQTT_PORT', '8883'),
-            'usuario': os.getenv('MQTT_USER', ''),
+            'broker': env('MQTT_HOST'), 'porta': env('MQTT_PORT', '8883'),
+            'usuario': env('MQTT_USER'),
             'topico_telemetria': edge.topic + '/telemetry',
+            # o que realmente trafega no cluster: se o ESP32 estiver publicando em
+            # outro topico, ele aparece aqui e o diagnostico acaba em uma requisicao.
+            'topicos_observados': sorted(edge.topics_seen),
             'ultima_telemetria_ha_s': (None if not edge.received_at
                                        else round(time.monotonic() - edge.received_at, 1)),
             'mensagens_recebidas': edge.received_count,

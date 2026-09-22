@@ -8,9 +8,19 @@ import uuid
 import paho.mqtt.client as mqtt
 
 
+def env(name, default=''):
+    """Variavel de ambiente sem espacos/quebras coladas no copiar-e-colar.
+
+    O ESP32 ja falhou uma vez por um espaco a mais dentro de MQTT_USER; no
+    painel do Render o mesmo erro e invisivel. Aqui ele deixa de existir.
+    """
+    return (os.getenv(name) or default).strip()
+
+
 class EdgeLink:
     def __init__(self):
-        self.topic = os.getenv('MQTT_TOPIC_BASE', 'smartmotor/SM-001')
+        self.topic = env('MQTT_TOPIC_BASE', 'smartmotor/SM-001').strip('/')
+        self.topics_seen = set()   # diagnostico: o que realmente trafega no cluster
         self.client = None
         self.connected = False
         self.latest = None
@@ -34,6 +44,9 @@ class EdgeLink:
         self.error = '' if self.connected else str(reason_code)
         if self.connected:
             client.subscribe([(self.topic + '/telemetry', 1), (self.topic + '/ack', 1)])
+            # Diagnostico: se o ESP32 publicar em outro topico do mesmo cluster,
+            # /health mostra onde, em vez de so dizer que nada chegou.
+            client.subscribe(self.topic.split('/')[0] + '/#', 0)
 
     def on_disconnect(self, client, userdata, flags, reason_code, properties):
         self.connected = False
@@ -41,6 +54,10 @@ class EdgeLink:
             self.latest = None
 
     def on_message(self, client, userdata, message):
+        if len(self.topics_seen) < 20:
+            self.topics_seen.add(message.topic)
+        if message.topic not in (self.topic + '/telemetry', self.topic + '/ack'):
+            return                      # veio da assinatura curinga de diagnostico
         # Retained telemetry/acks cannot prove this boot is alive.
         if message.retain:
             self.rejected_count += 1
@@ -131,16 +148,16 @@ class EdgeLink:
                 self.pending.pop(command_id, None)
 
     def start(self):
-        host, user, password = (os.getenv(k, '') for k in ('MQTT_HOST', 'MQTT_USER', 'MQTT_PASS'))
+        host, user, password = (env(k) for k in ('MQTT_HOST', 'MQTT_USER', 'MQTT_PASS'))
         if not all((host, user, password)):
             self.error = 'Configure MQTT_HOST, MQTT_USER e MQTT_PASS para o broker privado'
             return
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='smartmotor-render-' + uuid.uuid4().hex[:8])
         self.client.username_pw_set(user, password)
-        self.client.tls_set(ca_certs=os.getenv('MQTT_CA_FILE') or None, cert_reqs=ssl.CERT_REQUIRED)
+        self.client.tls_set(ca_certs=env('MQTT_CA_FILE') or None, cert_reqs=ssl.CERT_REQUIRED)
         self.client.on_connect, self.client.on_disconnect = self.on_connect, self.on_disconnect
         self.client.on_message = self.on_message
-        self.client.connect_async(host, int(os.getenv('MQTT_PORT', '8883')), keepalive=15)
+        self.client.connect_async(host, int(env('MQTT_PORT', '8883')), keepalive=15)
         self.client.loop_start()
         self.stop_event.clear()
 
