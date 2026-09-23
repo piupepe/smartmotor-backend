@@ -55,7 +55,7 @@ class Login(BaseModel):
 
 class NewUser(Login):
     name: str = Field(min_length=3, max_length=120)
-    password: str = Field(min_length=8, max_length=256)
+    password: str = Field(min_length=6, max_length=256)
     role: str = 'operador'
 
 def create_user(data):
