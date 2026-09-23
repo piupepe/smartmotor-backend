@@ -10,6 +10,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 from services.edge_link import EdgeLink, env, frontend_payload
+from services.auth import router as auth_router, session_user
 
 edge = EdgeLink()
 
@@ -20,6 +21,7 @@ async def lifespan(app):
     edge.close()
 
 app = FastAPI(title='SmartMotor TM221 físico', version='3.0.0', lifespan=lifespan)
+app.include_router(auth_router)
 app.add_middleware(CORSMiddleware,
     # .strip() por origem: um espaco depois da virgula no painel do Render derruba
     # o CORS sem nenhuma mensagem de erro no log.
@@ -37,10 +39,14 @@ bearer = HTTPBearer(auto_error=False, description='MOTOR_API_TOKEN configurado n
 
 def authorize(cred: HTTPAuthorizationCredentials | None = Depends(bearer)):
     token = env('MOTOR_API_TOKEN')
-    if not token:
-        raise HTTPException(503, 'Controle remoto ainda não configurado')
-    if cred is None or not hmac.compare_digest(cred.credentials.encode(), token.encode()):
-        raise HTTPException(401, 'Chave de operação inválida')
+    # Keep the service credential for integrations; dashboard uses user sessions.
+    if cred and token and hmac.compare_digest(cred.credentials.encode(), token.encode()):
+        return
+    if not env('AUTH_DB_PATH'):
+        raise HTTPException(401, 'Entre com uma conta cadastrada no servidor')
+    user = session_user(cred)
+    if user['role'] not in ('admin', 'operador'):
+        raise HTTPException(403, 'Perfil sem permissão para operar o motor')
 
 def send(action, **parameters):
     try:
